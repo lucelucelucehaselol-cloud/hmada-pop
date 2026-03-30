@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hamada Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:      #080810;
+            --surface: #0f0f1a;
+            --card:    #13131f;
+            --border:  #1e1e30;
+            --accent:  #4f46e5;
+            --alight:  #818cf8;
+            --green:   #22c55e;
+            --red:     #ef4444;
+            --text:    #e2e2f0;
+            --muted:   #52526e;
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+        }
+
+        body::before {
+            content:'';
+            position:fixed; inset:0;
+            background:
+                radial-gradient(ellipse 60% 40% at 15% 10%, rgba(79,70,229,.12) 0%, transparent 70%),
+                radial-gradient(ellipse 50% 35% at 85% 90%, rgba(129,140,248,.07) 0%, transparent 60%);
+            pointer-events:none; z-index:0;
+        }
+
+        .wrap { position:relative; z-index:1; width:100%; max-width:600px; }
+
+        /* Header */
+        .header { text-align:center; margin-bottom:36px; animation:up .6s ease both; }
+
+        .badge {
+            display:inline-flex; align-items:center; gap:6px;
+            background:rgba(79,70,229,.15); border:1px solid rgba(79,70,229,.3);
+            border-radius:99px; padding:5px 14px;
+            font-size:11px; font-weight:700; letter-spacing:2px;
+            text-transform:uppercase; color:var(--alight); margin-bottom:18px;
+        }
+
+        h1 {
+            font-size:clamp(30px,6vw,50px); font-weight:900; line-height:1.1; margin-bottom:10px;
+            background:linear-gradient(135deg,#fff 30%,var(--alight) 100%);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+        }
+
+        .sub { color:var(--muted); font-size:14px; }
+
+        /* Card */
+        .card {
+            background:var(--card); border:1px solid var(--border); border-radius:20px;
+            padding:28px;
+            box-shadow:0 0 80px rgba(79,70,229,.07), 0 24px 48px rgba(0,0,0,.5);
+            animation:up .6s .12s ease both;
+        }
+
+        /* Toggle */
+        .toggle {
+            display:grid; grid-template-columns:1fr 1fr; gap:4px;
+            background:var(--surface); border:1px solid var(--border);
+            border-radius:12px; padding:4px; margin-bottom:20px;
+        }
+
+        .tbtn {
+            display:flex; align-items:center; justify-content:center; gap:7px;
+            padding:11px; border:none; background:transparent;
+            color:var(--muted); font-family:'Cairo',sans-serif;
+            font-size:14px; font-weight:700; border-radius:9px; cursor:pointer; transition:all .2s;
+        }
+
+        .tbtn.on { background:var(--accent); color:#fff; box-shadow:0 4px 16px rgba(79,70,229,.45); }
+        .tbtn:not(.on):hover { color:var(--text); background:var(--border); }
+
+        /* Input */
+        .row { display:flex; gap:10px; margin-bottom:16px; }
+
+        input[type=text] {
+            flex:1; background:var(--surface); border:1px solid var(--border);
+            border-radius:12px; padding:14px 18px; color:var(--text);
+            font-family:'Cairo',sans-serif; font-size:14px; outline:none;
+            direction:ltr; transition:border .2s, box-shadow .2s;
+        }
+
+        input[type=text]::placeholder { color:var(--muted); }
+        input[type=text]:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(79,70,229,.18); }
+
+        .paste {
+            background:var(--surface); border:1px solid var(--border);
+            border-radius:12px; padding:14px 16px; font-size:18px;
+            color:var(--muted); cursor:pointer; transition:all .2s; flex-shrink:0;
+        }
+
+        .paste:hover { background:var(--border); color:var(--text); }
+
+        /* Go button */
+        .go {
+            width:100%; padding:16px;
+            background:linear-gradient(135deg,var(--accent) 0%,#7c3aed 100%);
+            border:none; border-radius:12px; color:#fff;
+            font-family:'Cairo',sans-serif; font-size:16px; font-weight:800;
+            cursor:pointer; transition:transform .25s, box-shadow .25s, opacity .25s;
+        }
+
+        .go:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 28px rgba(79,70,229,.45); }
+        .go:disabled { opacity:.55; cursor:not-allowed; }
+
+        /* Progress */
+        .prog-area { display:none; margin-top:24px; padding-top:24px; border-top:1px solid var(--border); }
+        .prog-area.show { display:block; animation:up .35s ease both; }
+
+        .prog-top { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+
+        .dot {
+            width:9px; height:9px; border-radius:50%;
+            background:var(--alight); animation:blink 1.1s infinite; flex-shrink:0;
+        }
+
+        .dot.ok  { background:var(--green); animation:none; }
+        .dot.err { background:var(--red);   animation:none; }
+
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        .prog-label { flex:1; font-size:14px; font-weight:600; }
+        .prog-pct   { font-size:13px; font-weight:800; color:var(--alight); }
+
+        .bar-bg { background:var(--surface); border-radius:6px; height:7px; overflow:hidden; }
+
+        .bar-fill {
+            height:100%;
+            background:linear-gradient(90deg,var(--accent),var(--alight));
+            border-radius:6px; width:0%; transition:width .4s ease;
+        }
+
+        .vid-title {
+            font-size:12px; color:var(--muted); margin-top:8px;
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+
+        /* Download button */
+        .dl-btn {
+            display:none; width:100%; padding:15px;
+            background:linear-gradient(135deg,#16a34a,var(--green));
+            border:none; border-radius:12px; color:#fff;
+            font-family:'Cairo',sans-serif; font-size:15px; font-weight:800;
+            cursor:pointer; margin-top:14px; text-decoration:none;
+            text-align:center; transition:transform .25s, box-shadow .25s;
+        }
+
+        .dl-btn.show { display:block; animation:pop .4s cubic-bezier(.34,1.56,.64,1) both; }
+        .dl-btn:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(34,197,94,.35); }
+
+        /* Error */
+        .err-box {
+            display:none; background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.25);
+            border-radius:11px; padding:13px 16px; margin-top:14px;
+            color:#fca5a5; font-size:13px; line-height:1.75;
+        }
+
+        .err-box.show { display:block; animation:up .3s ease both; }
+
+        /* Sites */
+        .sites { display:flex; flex-wrap:wrap; gap:7px; margin-top:24px; justify-content:center; }
+
+        .site {
+            background:var(--surface); border:1px solid var(--border);
+            border-radius:7px; padding:5px 11px; font-size:11px; font-weight:600; color:var(--muted);
+        }
+
+        .footer { text-align:center; margin-top:28px; font-size:11px; color:var(--muted); animation:up .6s .25s ease both; }
+
+        @keyframes up  { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+        @keyframes pop { from{opacity:0;transform:scale(.9)}        to{opacity:1;transform:none} }
+
+        @media(max-width:440px) { .card{padding:20px 16px} .row{flex-direction:column} }
+    </style>
+</head>
+<body>
+<div class="wrap">
+
+    <div class="header">
+        <div class="badge">▶ Hamada Downloader</div>
+        <h1>حمّل أي فيديو<br>في ثواني</h1>
+        <p class="sub">يوتيوب · فيسبوك · تيك توك · انستجرام والمزيد</p>
+    </div>
+
+    <div class="card">
+
+        <div class="toggle">
+            <button class="tbtn on" id="btnV" onclick="setFmt('video')">🎬 فيديو MP4</button>
+            <button class="tbtn"    id="btnA" onclick="setFmt('audio')">🎵 صوت MP3</button>
+        </div>
+
+        <div class="row">
+            <input type="text" id="url" placeholder="الصق رابط الفيديو هنا..." autocomplete="off">
+            <button class="paste" onclick="doPaste()" title="لصق">📋</button>
+        </div>
+
+        <button class="go" id="goBtn" onclick="startDl()">⬇ ابدأ التحميل</button>
+
+        <div class="prog-area" id="prog">
+            <div class="prog-top">
+                <div class="dot" id="dot"></div>
+                <div class="prog-label" id="lbl">جاري التحميل...</div>
+                <div class="prog-pct"  id="pct">0%</div>
+            </div>
+            <div class="bar-bg"><div class="bar-fill" id="fill"></div></div>
+            <div class="vid-title" id="vtitle"></div>
+        </div>
+
+        <a class="dl-btn" id="dlBtn" href="#" target="_blank">✅ اضغط هنا لتحميل الملف</a>
+        <div class="err-box" id="errBox"></div>
+
+    </div>
+
+    <div class="sites">
+        <span class="site">▶ YouTube</span>
+        <span class="site">📘 Facebook</span>
+        <span class="site">🎵 TikTok</span>
+        <span class="site">📸 Instagram</span>
+        <span class="site">🐦 Twitter/X</span>
+        <span class="site">+ 1000 موقع</span>
+    </div>
+
+    <div class="footer">Hamada Downloader · شغال على السيرفر 100%</div>
+
+</div>
+
+<script>
+let fmt  = 'video';
+let poll = null;
+
+function setFmt(f) {
+    fmt = f;
+    document.getElementById('btnV').classList.toggle('on', f === 'video');
+    document.getElementById('btnA').classList.toggle('on', f === 'audio');
+}
+
+async function doPaste() {
+    try {
+        document.getElementById('url').value = await navigator.clipboard.readText();
+    } catch { document.getElementById('url').focus(); }
+}
+
+function resetUI() {
+    clearInterval(poll);
+    document.getElementById('prog').classList.remove('show');
+    document.getElementById('dlBtn').classList.remove('show');
+    document.getElementById('dlBtn').href = '#';
+    document.getElementById('errBox').classList.remove('show');
+    document.getElementById('fill').style.width = '0%';
+    document.getElementById('pct').textContent  = '0%';
+    document.getElementById('vtitle').textContent = '';
+    document.getElementById('dot').className = 'dot';
+}
+
+function showErr(msg) {
+    document.getElementById('prog').classList.remove('show');
+    const b = document.getElementById('errBox');
+    b.textContent = msg;
+    b.classList.add('show');
+    resetBtn();
+}
+
+function resetBtn() {
+    const b = document.getElementById('goBtn');
+    b.disabled = false;
+    b.textContent = '⬇ ابدأ التحميل';
+}
+
+async function startDl() {
+    const url = document.getElementById('url').value.trim();
+    if (!url) { showErr('⚠️ حط رابط الفيديو الأول!'); return; }
+
+    resetUI();
+
+    const btn = document.getElementById('goBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ جاري المعالجة...';
+
+    document.getElementById('prog').classList.add('show');
+    document.getElementById('lbl').textContent = 'بيبدأ التحميل...';
+
+    try {
+        const r = await fetch('/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, format: fmt })
+        });
+        const d = await r.json();
+        if (d.error) { showErr(d.error); return; }
+        pollStatus(d.task_id);
+    } catch { showErr('❌ مش قادر يتصل بالسيرفر'); }
+}
+
+function pollStatus(tid) {
+    poll = setInterval(async () => {
+        try {
+            const d = await (await fetch('/status/' + tid)).json();
+
+            const pct = d.progress || 0;
+            document.getElementById('fill').style.width = pct + '%';
+            document.getElementById('pct').textContent  = pct + '%';
+            if (d.title) document.getElementById('vtitle').textContent = '📹 ' + d.title;
+
+            if (d.status === 'done') {
+                clearInterval(poll);
+                document.getElementById('fill').style.width = '100%';
+                document.getElementById('pct').textContent  = '100%';
+                document.getElementById('lbl').textContent  = 'اتحمل! ✓';
+                document.getElementById('dot').className    = 'dot ok';
+                const dl = document.getElementById('dlBtn');
+                dl.href = '/download/' + tid;
+                dl.classList.add('show');
+                resetBtn();
+            }
+
+            if (d.status === 'error') {
+                clearInterval(poll);
+                document.getElementById('dot').className = 'dot err';
+                document.getElementById('lbl').textContent = 'حصل خطأ ❌';
+                showErr('❌ ' + (d.error || 'خطأ غير متوقع'));
+            }
+        } catch { clearInterval(poll); showErr('❌ انقطع الاتصال'); }
+    }, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('url').addEventListener('keydown', e => {
+        if (e.key === 'Enter') startDl();
+    });
+});
+</script>
+</body>
+</html>
