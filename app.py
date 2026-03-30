@@ -42,7 +42,8 @@ COMMON_OPTS = {
         "Accept-Language": "en-US,en;q=0.9",
     },
     "extractor_args": {
-        "youtube": {"player_client": ["web", "android"]}
+        "youtube": {"player_client": ["web", "android"]},
+        "youtubetab": {"skip": ["authcheck"]},
     },
     "socket_timeout": 30,
     "retries": 5,
