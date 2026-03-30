@@ -1,5 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file, after_this_request
 import yt_dlp
+import shutil
+import subprocess
 import os
 import uuid
 import threading
@@ -77,6 +79,45 @@ PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 if PROXY_URL:
     COMMON_OPTS["proxy"] = PROXY_URL
 
+
+# ============================================================
+# FFmpeg location detection
+# ============================================================
+def find_ffmpeg():
+    # 1. Environment variable override
+    ff = os.environ.get("FFMPEG_PATH", "").strip()
+    if ff and os.path.isfile(ff):
+        return ff
+    # 2. shutil which (searches PATH)
+    ff = shutil.which("ffmpeg")
+    if ff:
+        return ff
+    # 3. Common nix store paths (Railway/nixpacks)
+    candidates = [
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/nix/var/nix/profiles/default/bin/ffmpeg",
+        "/run/current-system/sw/bin/ffmpeg",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    # 4. Search nix store dynamically
+    try:
+        result = subprocess.run(
+            ["find", "/nix/store", "-name", "ffmpeg", "-type", "f"],
+            capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.strip().splitlines():
+            if line.endswith("/ffmpeg") and os.path.isfile(line):
+                return line
+    except Exception:
+        pass
+    return None
+
+FFMPEG_PATH = find_ffmpeg()
+if FFMPEG_PATH:
+    COMMON_OPTS["ffmpeg_location"] = FFMPEG_PATH
 
 # ============================================================
 # Friendly Arabic error messages
@@ -159,15 +200,7 @@ def do_download(task_id: str, url: str, format_type: str):
                 ydl_opts = {
                     **COMMON_OPTS,
                     # Priority: ready mp4 file → merge → anything available
-                    "format": (
-                        "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/"
-                        "bestvideo[height<=720][ext=mp4]+bestaudio/"
-                        "bestvideo[height<=720]+bestaudio[ext=m4a]/"
-                        "bestvideo[height<=720]+bestaudio/"
-                        "best[height<=720][ext=mp4]/"
-                        "best[height<=720]/"
-                        "best[ext=mp4]/best"
-                    ),
+                    "format": "bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best",
                     "outtmpl": output_path + ".%(ext)s",
                     "merge_output_format": "mp4",
                     "postprocessors": [
