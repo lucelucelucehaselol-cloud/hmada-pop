@@ -124,14 +124,16 @@ if FFMPEG_PATH:
 # ============================================================
 def friendly_error(err: str) -> str:
     e = err.lower()
-    if "sign in" in e or "login" in e or "confirm" in e:
-        return "يوتيوب طلب تسجيل دخول أو اكتشف السيرفر. جدد cookies.txt وحاول تاني."
+    if "sign in" in e or "login" in e or "confirm" in e or "login required" in e or "authentication" in e:
+        return "الموقع ده بيطلب تسجيل دخول. لازم تضيف cookies للموقع ده في ملف cookies.txt وحاول تاني."
+    if "rate-limit" in e or "rate limit" in e:
+        return "الموقع عامل Rate Limit (كتر الطلبات). استنى 10 دقايق وجرب تاني."
     if "bot" in e or "automated" in e:
-        return "يوتيوب اعتبرك بوت. استنى 5 دقايق وحاول تاني، أو جدد الـ cookies."
+        return "الموقع اعتبرك بوت. استنى 5 دقايق وحاول تاني، أو جدد الـ cookies."
     if "429" in e or "too many" in e:
-        return "يوتيوب عامل Rate Limit. استنى 10 دقايق وجرب تاني."
+        return "كتر الطلبات على الموقع. استنى 10 دقايق وجرب تاني."
     if "403" in e:
-        return "يوتيوب رفض الطلب (403). جدد cookies.txt وحاول تاني."
+        return "الموقع رفض الطلب (403). جدد cookies.txt وحاول تاني."
     if "video unavailable" in e or "not available" in e:
         return "الفيديو ده مش متاح أو اتحذف."
     if "private video" in e:
@@ -200,7 +202,9 @@ def do_download(task_id: str, url: str, format_type: str):
                 ydl_opts = {
                     **COMMON_OPTS,
                     # Priority: ready mp4 file → merge → anything available
-                    "format": "bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best",
+                    # No format filters at all — let yt-dlp pick whatever is available
+                    "format": "bestvideo+bestaudio/best",
+                    "format_sort": ["res:720", "ext:mp4:m4a", "tbr", "br", "asr"],
                     "outtmpl": output_path + ".%(ext)s",
                     "merge_output_format": "mp4",
                     "postprocessors": [
