@@ -91,7 +91,7 @@ def do_download(task_id, url, format_type):
         else:
             ydl_opts = {
                 **COMMON_OPTS,
-                "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best",
+                "format": "bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best",
                 "outtmpl": output_path + ".%(ext)s",
                 "merge_output_format": "mp4",
                 "progress_hooks": [progress_hook],
