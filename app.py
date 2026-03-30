@@ -249,10 +249,7 @@ def do_download(task_id: str, url: str, format_type: str):
 
         except yt_dlp.utils.DownloadError as e:
             raw = str(e).replace("ERROR: ", "").strip()
-            # أرجع الـ raw error كمان عشان نشوف السبب الحقيقي
-            translated = friendly_error(raw)
-            final_err  = f"{translated}\n\n[Debug: {raw[:300]}]"
-            download_status[task_id].update({"status": "error", "error": final_err})
+            download_status[task_id].update({"status": "error", "error": friendly_error(raw)})
 
         except FileNotFoundError as e:
             download_status[task_id].update({"status": "error", "error": str(e)})
