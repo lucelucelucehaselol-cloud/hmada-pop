@@ -1,11 +1,9 @@
 from flask import Flask, render_template, request, jsonify, send_file, after_this_request
-import yt_dlp
-import shutil
-import subprocess
 import os
 import uuid
 import threading
 import time
+import requests
 
 app = Flask(__name__)
 
@@ -13,10 +11,10 @@ DOWNLOAD_FOLDER = "/tmp/downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 # ============================================================
-# Global state — works with workers=1 + threads=4
+# Global state
 # ============================================================
 download_status = {}
-semaphore = threading.Semaphore(3)   # max 3 downloads at the same time
+semaphore = threading.Semaphore(3)
 
 
 # ============================================================
@@ -38,117 +36,106 @@ threading.Thread(target=cleanup_old_files, daemon=True).start()
 
 
 # ============================================================
-# Common yt-dlp options
+# Cobalt API instances — لو واحدة وقفت يجرب التانية
 # ============================================================
-COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+COBALT_INSTANCES = [
+    "https://api.cobalt.tools",
+    "https://cobalt.api.onrender.com",
+    "https://co.wuk.sh",
+]
 
-COMMON_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "noprogress": True,
-    "http_headers": {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://www.youtube.com/",
-    },
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["web", "android", "ios"],
-        },
-        "youtubetab": {"skip": ["authcheck"]},
-    },
-    "socket_timeout": 60,
-    "retries": 10,
-    "fragment_retries": 10,
-    "file_access_retries": 5,
-    "ignoreerrors": False,
-    "geo_bypass": True,
-}
-
-# Cookies
-if os.path.exists(COOKIES_FILE):
-    COMMON_OPTS["cookiefile"] = COOKIES_FILE
-
-# Optional proxy from environment variable
-PROXY_URL = os.environ.get("PROXY_URL", "").strip()
-if PROXY_URL:
-    COMMON_OPTS["proxy"] = PROXY_URL
-
-
-# ============================================================
-# FFmpeg location detection
-# ============================================================
-def find_ffmpeg():
-    # 1. Environment variable override
-    ff = os.environ.get("FFMPEG_PATH", "").strip()
-    if ff and os.path.isfile(ff):
-        return ff
-    # 2. shutil which (searches PATH)
-    ff = shutil.which("ffmpeg")
-    if ff:
-        return ff
-    # 3. Common nix store paths (Railway/nixpacks)
-    candidates = [
-        "/usr/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/nix/var/nix/profiles/default/bin/ffmpeg",
-        "/run/current-system/sw/bin/ffmpeg",
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    # 4. Search nix store dynamically
-    try:
-        result = subprocess.run(
-            ["find", "/nix/store", "-name", "ffmpeg", "-type", "f"],
-            capture_output=True, text=True, timeout=10
-        )
-        for line in result.stdout.strip().splitlines():
-            if line.endswith("/ffmpeg") and os.path.isfile(line):
-                return line
-    except Exception:
-        pass
-    return None
-
-FFMPEG_PATH = find_ffmpeg()
-if FFMPEG_PATH:
-    COMMON_OPTS["ffmpeg_location"] = FFMPEG_PATH
 
 # ============================================================
 # Friendly Arabic error messages
 # ============================================================
 def friendly_error(err: str) -> str:
     e = err.lower()
-    if "sign in" in e or "login" in e or "confirm" in e or "login required" in e or "authentication" in e:
-        return "الموقع ده بيطلب تسجيل دخول. لازم تضيف cookies للموقع ده في ملف cookies.txt وحاول تاني."
-    if "rate-limit" in e or "rate limit" in e:
-        return "الموقع عامل Rate Limit (كتر الطلبات). استنى 10 دقايق وجرب تاني."
-    if "bot" in e or "automated" in e:
-        return "الموقع اعتبرك بوت. استنى 5 دقايق وحاول تاني، أو جدد الـ cookies."
-    if "429" in e or "too many" in e:
-        return "كتر الطلبات على الموقع. استنى 10 دقايق وجرب تاني."
-    if "403" in e:
-        return "الموقع رفض الطلب (403). جدد cookies.txt وحاول تاني."
-    if "video unavailable" in e or "not available" in e:
+    if "unavailable" in e or "not available" in e:
         return "الفيديو ده مش متاح أو اتحذف."
-    if "private video" in e:
+    if "private" in e:
         return "الفيديو خاص ومش متاح للعموم."
-    if "format is not available" in e or "requested format" in e:
-        return "الجودة المطلوبة مش متاحة لهذا الفيديو."
-    if "ffmpeg" in e:
-        return "مشكلة في ffmpeg أثناء تحويل الصوت. تأكد إن ffmpeg متنصب."
-    if "urlopen" in e or "network" in e or "connection" in e or "timeout" in e:
+    if "age" in e:
+        return "الفيديو ده محدود بالسن ومش ممكن تحميله."
+    if "rate" in e or "429" in e or "too many" in e:
+        return "كتر الطلبات. استنى دقيقة وجرب تاني."
+    if "timeout" in e or "connection" in e or "network" in e:
         return "مشكلة في الاتصال. تحقق من الشبكة وحاول تاني."
-    if "no such file" in e or "filenotfound" in e:
-        return "الملف ما اتحملش صح. حاول تاني."
-    if "no space" in e or "disk" in e:
-        return "السيرفر ملهوش مساحة كافية دلوقتي. حاول بعد شوية."
-    return err
+    if "unsupported" in e or "not supported" in e:
+        return "الموقع ده مش مدعوم. جرب يوتيوب أو تيك توك أو انستجرام."
+    if "error" in e:
+        return f"حصل خطأ: {err[:150]}"
+    return f"خطأ غير متوقع: {err[:150]}"
+
+
+# ============================================================
+# Call Cobalt API
+# ============================================================
+def call_cobalt(url: str, format_type: str) -> dict:
+    payload = {
+        "url": url,
+        "downloadMode": "audio" if format_type == "audio" else "auto",
+        "audioFormat": "mp3",
+        "audioBitrate": "192",
+        "videoQuality": "720",
+        "filenameStyle": "basic",
+    }
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    last_error = "كل الـ servers مش شغالة دلوقتي."
+
+    for instance in COBALT_INSTANCES:
+        try:
+            resp = requests.post(
+                f"{instance}/",
+                json=payload,
+                headers=headers,
+                timeout=30,
+            )
+
+            if resp.status_code == 429:
+                last_error = "كتر الطلبات. استنى دقيقة وجرب تاني."
+                continue
+
+            if resp.status_code != 200:
+                last_error = f"السيرفر رجع كود {resp.status_code}."
+                continue
+
+            data = resp.json()
+            status = data.get("status", "")
+
+            # نجاح مباشر — رابط تحميل جاهز
+            if status in ("redirect", "stream", "tunnel"):
+                return {"ok": True, "url": data.get("url"), "filename": data.get("filename", "")}
+
+            # picker — في أكتر من فيديو (playlist أو stories)
+            if status == "picker":
+                items = data.get("picker", [])
+                if items:
+                    return {"ok": True, "url": items[0].get("url"), "filename": ""}
+
+            # خطأ من Cobalt
+            if status == "error":
+                err_code = data.get("error", {}).get("code", "unknown")
+                last_error = friendly_error(err_code)
+                continue
+
+            last_error = f"رد غير متوقع من السيرفر: {status}"
+
+        except requests.exceptions.Timeout:
+            last_error = "السيرفر استغرق وقت طويل. حاول تاني."
+            continue
+        except requests.exceptions.ConnectionError:
+            last_error = "مش قادر يتصل بالسيرفر. تحقق من الاتصال."
+            continue
+        except Exception as ex:
+            last_error = friendly_error(str(ex))
+            continue
+
+    return {"ok": False, "error": last_error}
 
 
 # ============================================================
@@ -157,105 +144,75 @@ def friendly_error(err: str) -> str:
 def do_download(task_id: str, url: str, format_type: str):
     download_status[task_id].update({
         "status": "downloading",
-        "progress": 0,
+        "progress": 10,
         "title": "",
         "error": "",
     })
 
-    def progress_hook(d):
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 1
-            downloaded = d.get("downloaded_bytes", 0)
-            pct = int(min(downloaded / total * 100, 99))
-            download_status[task_id]["progress"] = pct
-        elif d["status"] == "finished":
-            download_status[task_id]["progress"] = 99
-
-    output_path = os.path.join(DOWNLOAD_FOLDER, task_id)
-
-    with semaphore:   # max 3 concurrent downloads
+    with semaphore:
         try:
+            # ── اطلب من Cobalt رابط التحميل ──────────────────
+            download_status[task_id]["progress"] = 20
+            result = call_cobalt(url, format_type)
+
+            if not result["ok"]:
+                raise Exception(result["error"])
+
+            dl_url   = result["url"]
+            filename = result.get("filename", "")
+
+            if not dl_url:
+                raise Exception("Cobalt ما رجعش رابط تحميل.")
+
+            # ── حدد الامتداد ──────────────────────────────────
             if format_type == "audio":
-                ydl_opts = {
-                    **COMMON_OPTS,
-                    "format": (
-                        "bestaudio[ext=m4a]/bestaudio[ext=webm]/"
-                        "bestaudio[ext=opus]/bestaudio/best"
-                    ),
-                    "outtmpl": output_path + ".%(ext)s",
-                    "postprocessors": [
-                        {
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        },
-                        {"key": "FFmpegMetadata", "add_metadata": True},
-                    ],
-                    "postprocessor_args": {
-                        "ffmpeg": ["-ar", "44100", "-ac", "2"],
-                    },
-                    "progress_hooks": [progress_hook],
-                }
                 final_ext = "mp3"
-
             else:
-                ydl_opts = {
-                    **COMMON_OPTS,
-                    # Priority: ready mp4 file → merge → anything available
-                    # No format filters at all — let yt-dlp pick whatever is available
-                    "format": "bestvideo+bestaudio/best",
-                    "format_sort": ["res:720", "ext:mp4:m4a", "tbr", "br", "asr"],
-                    "outtmpl": output_path + ".%(ext)s",
-                    "merge_output_format": "mp4",
-                    "postprocessors": [
-                        {"key": "FFmpegMetadata", "add_metadata": True},
-                    ],
-                    "progress_hooks": [progress_hook],
-                }
-                final_ext = "mp4"
+                # حاول تاخد الامتداد من اسم الملف
+                if filename and "." in filename:
+                    final_ext = filename.rsplit(".", 1)[-1].lower()
+                else:
+                    final_ext = "mp4"
 
-            # ── Download ──────────────────────────────────────
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                title = (info or {}).get("title", "video")
-                download_status[task_id]["title"] = title
+            # ── نزّل الملف من الرابط ──────────────────────────
+            download_status[task_id]["progress"] = 30
 
-            # ── Find output file ──────────────────────────────
-            file_path = output_path + f".{final_ext}"
+            output_path = os.path.join(DOWNLOAD_FOLDER, f"{task_id}.{final_ext}")
 
-            if not os.path.exists(file_path):
-                for f in sorted(os.listdir(DOWNLOAD_FOLDER)):
-                    if (f.startswith(task_id)
-                            and not f.endswith(".part")
-                            and not f.endswith(".ytdl")
-                            and not f.endswith(".jpg")
-                            and not f.endswith(".png")
-                            and not f.endswith(".webp")):
-                        candidate = os.path.join(DOWNLOAD_FOLDER, f)
-                        if os.path.isfile(candidate) and os.path.getsize(candidate) > 0:
-                            file_path = candidate
-                            final_ext = f.rsplit(".", 1)[-1] if "." in f else final_ext
-                            break
+            with requests.get(dl_url, stream=True, timeout=300) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length", 0))
+                downloaded = 0
 
-            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                raise FileNotFoundError("الملف ما اتحملش صح أو حجمه صفر")
+                with open(output_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 64):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total > 0:
+                                pct = int(min(30 + downloaded / total * 65, 95))
+                                download_status[task_id]["progress"] = pct
+
+            # ── تحقق من الملف ─────────────────────────────────
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                raise Exception("الملف ما اتحملش صح أو حجمه صفر.")
+
+            # ── اعمل عنوان من الـ URL ─────────────────────────
+            title = filename.rsplit(".", 1)[0] if filename else url.split("/")[-1][:60] or "video"
+            download_status[task_id]["title"] = title
 
             download_status[task_id].update({
                 "status": "done",
                 "progress": 100,
-                "file_path": file_path,
+                "file_path": output_path,
                 "ext": final_ext,
             })
 
-        except yt_dlp.utils.DownloadError as e:
-            raw = str(e).replace("ERROR: ", "").strip()
-            download_status[task_id].update({"status": "error", "error": friendly_error(raw)})
-
-        except FileNotFoundError as e:
-            download_status[task_id].update({"status": "error", "error": str(e)})
-
         except Exception as e:
-            download_status[task_id].update({"status": "error", "error": friendly_error(str(e))})
+            download_status[task_id].update({
+                "status": "error",
+                "error": friendly_error(str(e)),
+            })
 
 
 # ============================================================
@@ -280,7 +237,7 @@ def start_download():
     if fmt not in ("audio", "video"):
         fmt = "video"
 
-    # Simple rate limiting: max 10 active tasks
+    # Rate limiting
     active = sum(1 for v in download_status.values()
                  if v.get("status") in ("pending", "downloading"))
     if active >= 10:
@@ -328,12 +285,6 @@ def download_file(task_id):
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                # Remove thumbnail files if any
-                base = file_path.rsplit(".", 1)[0]
-                for thumb_ext in (".jpg", ".jpeg", ".png", ".webp"):
-                    tp = base + thumb_ext
-                    if os.path.exists(tp):
-                        os.remove(tp)
             except Exception:
                 pass
         threading.Timer(10.0, _delete).start()
